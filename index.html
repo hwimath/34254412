@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>정적분으로 정의된 함수(1)</title>
+  <!-- MathJax 로드 -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+  <style>
+    body {
+      background-color: #ffffff;
+      color: #000000;
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    .hidden {
+      display: none;
+    }
+    .quiz-container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .energy-bar {
+      width: 100%;
+      height: 20px;
+      background-color: #ddd;
+      position: relative;
+      margin-bottom: 10px;
+    }
+    .energy-fill {
+      height: 100%;
+      background-color: #000;
+      width: 100%;
+      transition: width 0.2s;
+    }
+    .answer-feedback {
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    .score-section, .life-section, .time-section {
+      margin: 5px 0;
+    }
+    .overall-time {
+      font-weight: bold;
+    }
+    .button {
+      margin: 10px 5px 0 0;
+      padding: 5px 10px;
+      background: #000;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    .button:disabled {
+      background: #666;
+      cursor: default;
+    }
+    .difficulty-label {
+      margin-right: 10px;
+    }
+    #response {
+      white-space: pre-wrap;
+      background: #eee;
+      margin-top: 10px;
+      padding: 5px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="quiz-container" id="start-screen">
+  <h1>정적분으로 정의된 함수(1)</h1>
+  <p>이름을 입력하세요:</p>
+  <input type="text" id="playerName" placeholder="이름" />
+  
+  <p>난이도를 선택하세요:</p>
+  <label class="difficulty-label"><input type="radio" name="difficulty" value="top" /> 최상 (20초)</label>
+  <label class="difficulty-label"><input type="radio" name="difficulty" value="high" /> 상 (30초)</label>
+  <label class="difficulty-label"><input type="radio" name="difficulty" value="mid" /> 중 (40초)</label>
+  <label class="difficulty-label"><input type="radio" name="difficulty" value="low" /> 하 (시간 제한 없음)</label>
+  
+  <br><br>
+  <button class="button" onclick="startGame()">게임 시작</button>
+</div>
+
+<div class="quiz-container hidden" id="game-screen">
+  <div class="time-section">
+    전체 진행 시간: <span class="overall-time" id="overall-time">0</span>초
+  </div>
+  <div class="life-section">
+    남은 기회: <span id="life-count">3</span>
+  </div>
+  <div class="score-section">
+    점수: <span id="score">0</span>
+  </div>
+  
+  <div class="energy-bar" id="energy-bar">
+    <div class="energy-fill" id="energy-fill"></div>
+  </div>
+  
+  <div id="question-area"></div>
+  
+  <div id="choice-area"></div>
+  
+  <button class="button" id="submit-answer-btn" onclick="submitAnswer()" disabled>정답 제출</button>
+  
+  <div class="answer-feedback" id="feedback"></div>
+  
+  <button class="button" id="next-question-btn" onclick="nextQuestion()" disabled>다음 문제</button>
+</div>
+
+<div class="quiz-container hidden" id="end-screen">
+  <h2>게임 종료</h2>
+  <p>최종 점수: <span id="final-score"></span></p>
+  <p>총 걸린 시간: <span id="final-time"></span>초</p>
+  <button class="button" onclick="sendScore()">점수전송</button>
+  <div id="response"></div>
+</div>
+
+<script>
+/* ----------------------------------
+   서버로 데이터 전송 함수 (주어진 코드)
+-------------------------------------*/
+async function saveData(game, name, score, elapsedTime) {
+    const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+    const requestData = {
+        game,
+        name,
+        score: parseInt(score, 10),
+        elapsedTime: parseInt(elapsedTime, 10)
+    };
+
+    try {
+        const response = await fetch(FUNCTION_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
+
+        const responseData = await response.json();
+
+        if (response.ok) {
+            document.getElementById('response').innerText = 
+                "성공: " + JSON.stringify(responseData, null, 2);
+        } else {
+            document.getElementById('response').innerText = 
+                "오류: " + JSON.stringify(responseData, null, 2);
+        }
+    } catch (error) {
+        console.error('요청 실패:', error);
+        document.getElementById('response').innerText = 
+            "네트워크 오류: " + error.message;
+    }
+}
+
+/* -----------------------------------------------------
+   문제 목록 (중복 없이, 근삿값 없는 32문제, 무작위 출제 예정)
+   - correctAnswer에는 실제 정답 문자열을 저장하여,
+     사용자가 선택한 항목과 비교
+--------------------------------------------------------*/
+const quizData = [
+  {
+    question: "다음 조건 \\(\\int_{2}^{x} f(t)\\,dt = x^2 - 2x - 6\\)을 만족하는 함수 \\(f\\)에 대하여, \\(f(5)\\)의 값은?",
+    choices: ["\\(6\\)", "\\(7\\)", "\\(8\\)", "\\(10\\)"],
+    correctAnswer: "\\(8\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 12x - 2\\int_{0}^{1} f(t)\\,dt\\)를 만족하는 함수 \\(f\\)를 고르시오.",
+    choices: [
+      "\\(f(x) = 12x - 4\\)",
+      "\\(f(x) = 12x + 2\\)",
+      "\\(f(x) = 6x - 2\\)",
+      "\\(f(x) = 6x - 4\\)"
+    ],
+    correctAnswer: "\\(f(x) = 12x - 4\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 2x - 3\\int_{0}^{2} f(t)\\,dt\\)를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(2x + \\dfrac{12}{7}\\)",
+      "\\(2x - \\dfrac{4}{7}\\)",
+      "\\(2x - \\dfrac{12}{7}\\)",
+      "\\(2x - \\dfrac{6}{7}\\)"
+    ],
+    correctAnswer: "\\(2x - \\dfrac{12}{7}\\)"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^2 + 6x + 9\\)를 만족하는 \\(a\\)와 \\(f(x)\\)는?",
+    choices: [
+      "\\(a=-3,\\; f(x)=2x+6\\)",
+      "\\(a=3,\\; f(x)=2x-6\\)",
+      "\\(a=-3,\\; f(x)=x+6\\)",
+      "\\(a=1,\\; f(x)=2x+6\\)"
+    ],
+    correctAnswer: "\\(a=-3,\\; f(x)=2x+6\\)"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^3 - 1\\)을 만족하는 \\(a\\)와 \\(f(x)\\)를 구하시오.",
+    choices: [
+      "\\(a=1,\\; f(x)=3x^2\\)",
+      "\\(a=-1,\\; f(x)=3x^2\\)",
+      "\\(a=1,\\; f(x)=3x\\)",
+      "\\(a=1,\\; f(x)=x^3 -1\\)"
+    ],
+    correctAnswer: "\\(a=1,\\; f(x)=3x^2\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = -x + \\int_{0}^{2} f(t)\\,dt\\)을 만족하는 함수 \\(f(x)\\)는?",
+    choices: [
+      "\\(-x - 2\\)",
+      "\\(-x + 2\\)",
+      "\\(x + 2\\)",
+      "\\(-2x + 2\\)"
+    ],
+    correctAnswer: "\\(-x + 2\\)"
+  },
+  {
+    question: "다음 \\(\\int_{1}^{x} f(t)\\,dt = x^4 + x^3 - 2ax^2\\)를 만족할 때, \\(f(1)\\)의 값은?",
+    choices: ["\\(3\\)", "\\(4\\)", "\\(5\\)", "\\(-1\\)"],
+    correctAnswer: "\\(3\\)"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^2 + 3x - 4\\)를 만족하는 \\(f(x)\\)와 \\(a\\)를 구하시오.",
+    choices: [
+      "\\(f(x)=2x+3,\\; a=1\\)",
+      "\\(f(x)=2x+3,\\; a=-4\\)",
+      "\\(\\text{위 두 가지 모두 가능}\\)",
+      "\\(\\text{둘 다 불가능}\\)"
+    ],
+    correctAnswer: "\\(\\text{위 두 가지 모두 가능}\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 3x^2 + \\int_{0}^{1} (2x - 1) f(t)\\,dt\\)를 만족하는 함수 \\(f\\)에 대해 \\(\\int_{0}^{1} f(x)\\,dx\\)의 값을 구하시오.",
+    choices: ["\\(0\\)", "\\(1\\)", "\\(2\\)", "\\(3\\)"],
+    correctAnswer: "\\(1\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 2x + \\int_{0}^{2} f(t)\\,dt\\)를 만족하는 함수 \\(f(x)\\)는?",
+    choices: [
+      "\\(2x + 4\\)",
+      "\\(2x - 4\\)",
+      "\\(4x - 2\\)",
+      "\\(2x - 2\\)"
+    ],
+    correctAnswer: "\\(2x - 4\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 3x^2 + x + \\int_{0}^{2} f(t)\\,dt\\)를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(3x^2 + x + 10\\)",
+      "\\(3x^2 + x - 10\\)",
+      "\\(3x^2 - x - 10\\)",
+      "\\(x^2 + 3x - 10\\)"
+    ],
+    correctAnswer: "\\(3x^2 + x - 10\\)"
+  },
+  {
+    question: "다음 \\(\\int_{0}^{x} f(t)\\,dt = 2x^2 - 3x\\)를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(4x + 3\\)",
+      "\\(4x - 3\\)",
+      "\\(x^2 - 3x\\)",
+      "\\(2x^2 - 3x\\)"
+    ],
+    correctAnswer: "\\(4x - 3\\)"
+  },
+  {
+    question: "다음 \\(\\int_{0}^{x} f(t)\\,dt = x^3 + 5x^2 - 4x + 1\\)을 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(3x^2 + 10x - 4\\)",
+      "\\(x^3 + 5x^2 - 4x + 1\\)",
+      "\\(3x^2 + 5x - 4\\)",
+      "\\(3x^2 + 10x + 4\\)"
+    ],
+    correctAnswer: "\\(3x^2 + 10x - 4\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = x^3 - 2x + \\int_{0}^{1} f(y)\\,dy\\)를 만족하는 함수 \\(f\\)가 존재한다면 고르시오.",
+    choices: [
+      "\\(f(x) = x^3 - 2x\\)",
+      "\\(f(x) = x^3 - 2x + \\dfrac{3}{4}\\)",
+      "\\(f(x) = x^3 - 2x - \\dfrac{3}{4}\\)",
+      "\\(\\text{위 조건을 만족하는 함수는 존재하지 않는다.}\\)"
+    ],
+    correctAnswer: "\\(\\text{위 조건을 만족하는 함수는 존재하지 않는다.}\\)"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^3 + 8\\)를 만족하는 \\(a\\)와 \\(f(x)\\)는?",
+    choices: [
+      "\\(a=-2,\\; f(x)=3x^2\\)",
+      "\\(a=2,\\; f(x)=3x^2\\)",
+      "\\(a=-2,\\; f(x)=x^3+8\\)",
+      "\\(a=2,\\; f(x)=x^3+8\\)"
+    ],
+    correctAnswer: "\\(a=-2,\\; f(x)=3x^2\\)"
+  },
+  {
+    question: "다음 \\(\\int_{0}^{x} f(t)\\,dt = x^3 - 1\\)를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(3x^2\\)",
+      "\\(x^3 - 1\\)",
+      "\\(3x\\)",
+      "\\(x^2\\)"
+    ],
+    correctAnswer: "\\(3x^2\\)"
+  },
+  {
+    question: "다음 \\(\\int_{0}^{x} (t-1)f(t)\\,dt = x^3 - x^2 - x + a\\)를 만족할 때, \\(f(1)\\)의 값은?",
+    choices: ["\\(3\\)", "\\(4\\)", "\\(0\\)", "\\(\\text{정해지지 않음}\\)"],
+    correctAnswer: "\\(4\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 2x - x + \\int_{0}^{2} f(t)\\,dt\\)를 정리하면 \\(f(x) = x + \\int_{0}^{2} f(t)\\,dt\\)가 된다. 이를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(x + 2\\)",
+      "\\(x - 2\\)",
+      "\\(2x - 1\\)",
+      "\\(x - 1\\)"
+    ],
+    correctAnswer: "\\(x - 2\\)"
+  },
+  {
+    question: "다음 \\(\\int_{1}^{x} f(t)\\,dt = x^3 + 2ax^2\\)를 만족할 때 \\(f(3)\\)의 값은?",
+    choices: ["\\(9\\)", "\\(15\\)", "\\(21\\)", "\\(27\\)"],
+    correctAnswer: "\\(21\\)"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^3 + 1\\)을 만족하는 \\(a\\)와 \\(f(x)\\)는?",
+    choices: [
+      "\\(a=-1,\\; f(x)=3x^2\\)",
+      "\\(a=1,\\; f(x)=3x^2\\)",
+      "\\(a=-1,\\; f(x)=x^3+1\\)",
+      "\\(a=1,\\; f(x)=x^3+1\\)"
+    ],
+    correctAnswer: "\\(a=-1,\\; f(x)=3x^2\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 3x^2 + 4x - \\int_{0}^{2} f(t)\\,dt\\)를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(3x^2 + 4x + \\dfrac{16}{3}\\)",
+      "\\(3x^2 + 4x - \\dfrac{16}{3}\\)",
+      "\\(3x^2 - 4x + \\dfrac{16}{3}\\)",
+      "\\(3x^2 + 4x - 4\\)"
+    ],
+    correctAnswer: "\\(3x^2 + 4x - \\dfrac{16}{3}\\)"
+  },
+  {
+    question: "다음 \\(\\int_{1}^{x} f(t)\\,dt = x^3 - 2x^2 + ax + 1\\)를 만족할 때, \\(f(1)\\)은?",
+    choices: ["\\(-1\\)", "\\(0\\)", "\\(1\\)", "\\(2\\)"],
+    correctAnswer: "\\(-1\\)"
+  },
+  {
+    question: "다음 \\(\\int_{1}^{x} f(t)\\,dt = x^2 + 2ax - a\\)를 만족하는 \\(f(x)\\)에서 \\(f(5)\\)는?",
+    choices: ["6", "7", "8", "9"],
+    correctAnswer: "8"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^2 - 4x + 4\\)를 만족하는 \\(a\\)와 \\(f(x)\\)는?",
+    choices: [
+      "\\(a=1,\\; f(x)=2x-4\\)",
+      "\\(a=2,\\; f(x)=2x-4\\)",
+      "\\(a=2,\\; f(x)=2x+4\\)",
+      "\\(a=4,\\; f(x)=2x-4\\)"
+    ],
+    correctAnswer: "\\(a=2,\\; f(x)=2x-4\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = x^3 - 4x^2 + 3x \\int_{0}^{1} f(t)\\,dt\\)를 만족하는 \\(f(x)\\)를 구하시오.",
+    choices: [
+      "\\(x^3 - 4x^2 + \\dfrac{13}{2} x\\)",
+      "\\(x^3 - 4x^2 + 13x\\)",
+      "\\(x^3 - 4x^2 - \\dfrac{13}{2} x\\)",
+      "\\(\\text{해 없음}\\)"
+    ],
+    correctAnswer: "\\(x^3 - 4x^2 + \\dfrac{13}{2} x\\)"
+  },
+  {
+    question: "다음 \\(x f(x) = x^4 - 2x^2 + \\int_{2}^{x} t f(t)\\,dt\\)를 만족하는 다항함수 \\(f\\)에 대하여 \\(f(2)\\)의 값은?",
+    choices: ["2", "3", "4", "6"],
+    correctAnswer: "4"
+  },
+  {
+    question: "다음 \\(\\int_{1}^{x} f(t)\\,dt = x^3 + x^2 + ax\\)를 만족할 때 \\(f(1)\\)의 값은?",
+    choices: ["1", "2", "3", "-2"],
+    correctAnswer: "3"
+  },
+  {
+    question: "다음 식 \\(f(x) = -3x^2 + 2x + \\int_{0}^{2} f(t)\\,dt\\)를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(-3x^2 + 2x - 4\\)",
+      "\\(-3x^2 - 2x + 4\\)",
+      "\\(-3x^2 + 2x + 4\\)",
+      "\\(3x^2 + 2x + 4\\)"
+    ],
+    correctAnswer: "\\(-3x^2 + 2x + 4\\)"
+  },
+  {
+    question: "다음 식 \\(f(x) = 3x^2 + 2x + 2\\int_{0}^{1} f(t)\\,dt\\)를 만족하는 \\(f(x)\\)는?",
+    choices: [
+      "\\(3x^2 + 2x + 4\\)",
+      "\\(3x^2 + 2x - 4\\)",
+      "\\(3x^2 - 2x - 4\\)",
+      "\\(x^2 + 2x - 4\\)"
+    ],
+    correctAnswer: "\\(3x^2 + 2x - 4\\)"
+  },
+  {
+    question: "다음 \\(\\int_{1}^{x} (x - t) f(t)\\,dt = x^4 - 2x^2 + 10\\) (단 \\(x>1\\))을 만족할 때, \\(f(1)\\)의 값은?",
+    choices: ["6", "7", "8", "10"],
+    correctAnswer: "8"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^3 - x^2 - x + a\\) (\\(a>0\\))를 만족시키는 \\(a\\)와 \\(f(x)\\)는?",
+    choices: [
+      "\\(a=1,\\; f(x)=3x^2 - 2x -1\\)",
+      "\\(a=1,\\; f(x)=3x^2 - 2x +1\\)",
+      "\\(a=2,\\; f(x)=3x^2 - 2x -1\\)",
+      "\\(\\text{그런 }a\\text{는 존재하지 않음}\\)"
+    ],
+    correctAnswer: "\\(a=1,\\; f(x)=3x^2 - 2x -1\\)"
+  },
+  {
+    question: "다음 \\(\\int_{a}^{x} f(t)\\,dt = x^3 + x^2 - ax -1\\)를 만족할 때 올바른 해는?",
+    choices: [
+      "\\(a=1,\\; f(x)=3x^2 + 2x -1\\)",
+      "\\(a=1,\\; f(x)=3x^2 + 2x +1\\)",
+      "\\(a=-1,\\; f(x)=3x^2 + 2x -1\\)",
+      "\\(\\text{어떤 }a\\text{로도 불가능}\\)"
+    ],
+    correctAnswer: "\\(a=1,\\; f(x)=3x^2 + 2x -1\\)"
+  }
+];
+
+/* --------------------------
+   전역 변수들
+---------------------------*/
+let currentQuestionIndex = 0;
+let score = 0;
+let life = 3;
+let quizStartTime = 0;    // 전체 게임 시간 측정용
+let overallTimer = null;
+let questionTimer = null;
+let chosenDifficulty = null;
+let timeLimit = 0;        // 각 문제 제한 시간(초) (하: 무제한이면 특별 처리)
+let remainingTime = 0;    // 현재 문제의 남은 시간
+let userName = "";
+let answered = false;     // 현재 문제 답변 여부
+
+// 난이도별 점수
+const difficultyScores = {
+  top: 20,
+  high: 15,
+  mid: 13,
+  low: 10
+};
+
+/* -------------
+  배열 셔플 함수
+---------------*/
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+/* -------------------------------
+   게임 시작 시 초기화 함수
+--------------------------------*/
+function startGame() {
+  const nameInput = document.getElementById('playerName');
+  userName = nameInput.value.trim();
+  if (!userName) {
+    alert("이름을 입력하세요!");
+    return;
+  }
+  
+  const difficultyRadios = document.getElementsByName('difficulty');
+  let selected = false;
+  for (let i = 0; i < difficultyRadios.length; i++) {
+    if (difficultyRadios[i].checked) {
+      chosenDifficulty = difficultyRadios[i].value;
+      selected = true;
+      break;
+    }
+  }
+  if (!selected) {
+    alert("난이도를 선택하세요!");
+    return;
+  }
+  
+  // 난이도별 시간 설정
+  if (chosenDifficulty === "top") {
+    timeLimit = 20;
+  } else if (chosenDifficulty === "high") {
+    timeLimit = 30;
+  } else if (chosenDifficulty === "mid") {
+    timeLimit = 40;
+  } else {
+    timeLimit = Infinity; // 하: 시간 제한 없음
+  }
+  
+  // 문제/보기 배열 섞기
+  shuffleArray(quizData);
+  
+  // 점수/목숨/인덱스 초기화
+  score = 0;
+  life = 3;
+  currentQuestionIndex = 0;
+  
+  // UI 전환
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('game-screen').classList.remove('hidden');
+  document.getElementById('life-count').textContent = life;
+  document.getElementById('score').textContent = score;
+  
+  // 전체 시간 타이머 시작
+  quizStartTime = Date.now();
+  overallTimer = setInterval(updateOverallTime, 1000);
+  
+  // 첫 문제 표시
+  loadQuestion();
+}
+
+/* -------------------------------------
+   전체 진행 시간 표시 (매초 갱신)
+--------------------------------------*/
+function updateOverallTime() {
+  const now = Date.now();
+  const elapsedSec = Math.floor((now - quizStartTime) / 1000);
+  document.getElementById('overall-time').textContent = elapsedSec;
+}
+
+/* -------------------------------------
+   문제 로딩
+--------------------------------------*/
+function loadQuestion() {
+  // 만약 모든 문제를 1바퀴 다 돌았으면 -> 이후엔 무작위로 계속
+  if (currentQuestionIndex >= quizData.length) {
+    // 다시 섞어서 무한 반복
+    shuffleArray(quizData);
+    currentQuestionIndex = 0;
+  }
+  
+  const qData = quizData[currentQuestionIndex];
+  
+  // 보기를 다시 셔플하려면, 정답 비교 로직이 복잡해지므로
+  // 여기서는 보기 순서는 유지, 정답 문자열로 직접 비교하는 방식을 사용.
+  // (원한다면 여기서도 shuffleArray(qData.choices) 후 별도 매핑 가능)
+  
+  document.getElementById('question-area').innerHTML = qData.question;
+  
+  // 보기 출력
+  const choiceArea = document.getElementById('choice-area');
+  choiceArea.innerHTML = "";
+  qData.choices.forEach((choice) => {
+    const label = document.createElement('label');
+    label.style.display = "block";
+    
+    const radio = document.createElement('input');
+    radio.type = "radio";
+    radio.name = "quiz-choice";
+    radio.value = choice;
+    radio.onclick = () => {
+      // 답안 하나 선택하면 제출 버튼 활성화
+      document.getElementById('submit-answer-btn').disabled = false;
+    };
+    
+    label.appendChild(radio);
+    // 수식 렌더링을 위해 span에 넣어준다
+    const span = document.createElement('span');
+    span.innerHTML = choice;
+    
+    label.appendChild(span);
+    choiceArea.appendChild(label);
+  });
+  
+  // 피드백, 다음문제 버튼 초기화
+  document.getElementById('feedback').textContent = "";
+  document.getElementById('next-question-btn').disabled = true;
+  document.getElementById('submit-answer-btn').disabled = true;
+  answered = false;
+  
+  // MathJax 렌더링
+  MathJax.typeset();
+  
+  // 에너지바 시간 초기화
+  if (timeLimit === Infinity) {
+    // 하(무제한)
+    document.getElementById('energy-fill').style.width = "100%";
+  } else {
+    remainingTime = timeLimit;
+    updateEnergyBar();
+    // 혹시 이전 타이머 있으면 제거
+    if (questionTimer) clearInterval(questionTimer);
+    // 새 타이머 시작
+    questionTimer = setInterval(() => {
+      remainingTime--;
+      if (remainingTime <= 0) {
+        // 시간 초과 => 기회 1 감소, 정답 공개, 다음문제로
+        clearInterval(questionTimer);
+        timeOutProcess();
+      } else {
+        updateEnergyBar();
+      }
+    }, 1000);
+  }
+}
+
+/* -------------------------------------
+   에너지바 갱신
+--------------------------------------*/
+function updateEnergyBar() {
+  const bar = document.getElementById('energy-fill');
+  if (timeLimit === Infinity) {
+    // 하(무제한)
+    bar.style.width = "100%";
+  } else {
+    const percentage = (remainingTime / timeLimit) * 100;
+    bar.style.width = percentage + "%";
+  }
+}
+
+/* -------------------------------------
+   시간 초과 처리
+--------------------------------------*/
+function timeOutProcess() {
+  // 목숨 1 깎고 정답 공개
+  life--;
+  document.getElementById('life-count').textContent = life;
+  
+  const qData = quizData[currentQuestionIndex];
+  document.getElementById('feedback').textContent =
+    "시간 초과! 정답은 " + qData.correctAnswer + " 이었습니다.";
+  
+  if (life <= 0) {
+    gameOver();
+    return;
+  }
+  
+  // 다음 문제 버튼 활성화
+  document.getElementById('next-question-btn').disabled = false;
+}
+
+/* -------------------------------------
+   정답 제출
+--------------------------------------*/
+function submitAnswer() {
+  if (answered) return; // 이미 제출했으면 무시
+  answered = true;
+  
+  // 시간 타이머 정지
+  if (questionTimer) clearInterval(questionTimer);
+  
+  // 선택된 라디오 찾기
+  const radios = document.getElementsByName('quiz-choice');
+  let selectedValue = null;
+  for (let i = 0; i < radios.length; i++) {
+    if (radios[i].checked) {
+      selectedValue = radios[i].value;
+      break;
+    }
+  }
+  if (!selectedValue) {
+    alert("보기 선택 후 제출하세요!");
+    answered = false;
+    return;
+  }
+  
+  // 정답 비교
+  const qData = quizData[currentQuestionIndex];
+  const isCorrect = (selectedValue === qData.correctAnswer);
+  
+  if (isCorrect) {
+    // 정답
+    document.getElementById('feedback').textContent = "정답입니다!";
+    // 점수 추가
+    let addScore = difficultyScores[chosenDifficulty];
+    score += addScore;
+    document.getElementById('score').textContent = score;
+  } else {
+    // 오답
+    life--;
+    document.getElementById('life-count').textContent = life;
+    document.getElementById('feedback').textContent =
+      "오답입니다! 정답은 " + qData.correctAnswer + " 입니다.";
+    if (life <= 0) {
+      gameOver();
+      return;
+    }
+  }
+  
+  // 다음 문제 버튼 활성화
+  document.getElementById('next-question-btn').disabled = false;
+}
+
+/* -------------------------------------
+   다음 문제로 넘어가기
+--------------------------------------*/
+function nextQuestion() {
+  // 현재 문제 인덱스 증가
+  currentQuestionIndex++;
+  loadQuestion();
+}
+
+/* -------------------------------------
+   3번 틀리거나 기타 종료 시
+--------------------------------------*/
+function gameOver() {
+  // 모든 타이머 정지
+  if (questionTimer) clearInterval(questionTimer);
+  if (overallTimer) clearInterval(overallTimer);
+  
+  // 최종 점수/시간 표시
+  const now = Date.now();
+  const elapsedSec = Math.floor((now - quizStartTime) / 1000);
+  
+  document.getElementById('final-score').textContent = score;
+  document.getElementById('final-time').textContent = elapsedSec;
+  
+  document.getElementById('game-screen').classList.add('hidden');
+  document.getElementById('end-screen').classList.remove('hidden');
+}
+
+/* -------------------------------------
+   점수 전송 버튼 누르면
+--------------------------------------*/
+function sendScore() {
+  const now = Date.now();
+  const elapsedSec = Math.floor((now - quizStartTime) / 1000);
+  saveData("정적분으로 정의된 함수(1)", userName, score, elapsedSec);
+}
+</script>
+
+</body>
+</html>
